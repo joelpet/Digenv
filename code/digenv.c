@@ -8,6 +8,7 @@
 #define PIPE_WRITE_SIDE 1
 
 /* TODO update comments */
+/* TODO hantera fall där en fas i pipeliningen misslyckas, t.ex. fel parametrar till grep */
 
 /**
  * Define a pipe file descriptor type for neater code.
