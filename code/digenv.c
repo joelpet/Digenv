@@ -7,6 +7,8 @@
 #define PIPE_READ_SIDE 0
 #define PIPE_WRITE_SIDE 1
 
+/* TODO update comments */
+
 /**
  * Define a pipe file descriptor type for neater code.
  */
@@ -19,33 +21,39 @@ int main(int argc, char** argv) {
     pid_t childpid;
     /* Array of three pipe file descriptors. */
     pipe_fd_t pipe_fds[3];
+    int num_pipes;
     int return_value;
     int status;
-    char* pager;
+    int i;
+    /* The index of the pipe_fd that follows the current filter. */
+    int cur_pipe = 0;
 
-    /* TODO fixa lite här */
     if (argc == 0) {
+        num_pipes = 2;
     } else {
+        num_pipes = 3;
     }
 
-    /* Create first pipe. */
-    return_value = pipe(pipe_fds[0]);
-    check_error(return_value,  "Could not initialize first pipe.\n");
+    /* Create pipes. */
+    for (i = 0; i < num_pipes; ++i) {
+        return_value = pipe(pipe_fds[i]);
+        check_error(return_value, "Could not initialize pipe.\n");
+    }
 
     /* Create child process that will eventually execute `printenv`. */
     childpid = fork();
 
     if (0 == childpid) {
         /* Replace stdout med duplicated write side of the pipe. */
-        return_value = dup2(pipe_fds[0][PIPE_WRITE_SIDE], STDOUT_FILENO);
+        return_value = dup2(pipe_fds[cur_pipe][PIPE_WRITE_SIDE], STDOUT_FILENO);
         check_error(return_value,  "printenv&: Could not duplicate write side of first pipe.\n");
     
         /* printenv should not read from pipe -- close the read side. */
-        return_value = close(pipe_fds[0][PIPE_READ_SIDE]);
+        return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
         check_error(return_value,  "Could not close read side of pipe.\n");
 
         /* stdout now points to write side of pipe -- close duplicated file desc. */
-        return_value = close(pipe_fds[0][PIPE_WRITE_SIDE]);
+        return_value = close(pipe_fds[cur_pipe][PIPE_WRITE_SIDE]);
         check_error(return_value,  "Could not close write side of pipe.\n");
 
         /* Execute printenv and give it "printenv" as first parameter. */
@@ -58,28 +66,34 @@ int main(int argc, char** argv) {
     check_error(childpid,  "Could not fork printenv.\n");
 
     /* Forking `printenv` went fine. */
-    /* Create second pipe. */
-    return_value = pipe(pipe_fds[1]);
-    check_error(return_value, "Could not create second pipe.");
+
+    /* Done with one filter, move cur_pipe one step ahead. */
+    ++cur_pipe;
+
+    /* If arguments where given, use grep with those. */
+    if (argc > 1) {
+
+    }
+
 
     /* Create child process that will eventually execute `sort`. */
     childpid = fork();
 
     if (0 == childpid) {
         /* Replace stdin with duplicated read side of first pipe. */
-        return_value = dup2(pipe_fds[0][PIPE_READ_SIDE], STDIN_FILENO);
+        return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
         check_error(return_value, "sort&: Could not duplicate read side of first pipe.\n");
 
         /* sort should not write to first pipe -- close the write side. */
-        return_value = close(pipe_fds[0][PIPE_WRITE_SIDE]);
+        return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
         check_error(return_value, "Could not close write side of first pipe.");
 
         /* Replace stdout with duplicated write side of second pipe. */
-        return_value = dup2(pipe_fds[1][PIPE_WRITE_SIDE], STDOUT_FILENO);
+        return_value = dup2(pipe_fds[cur_pipe][PIPE_WRITE_SIDE], STDOUT_FILENO);
         check_error(return_value, "sort&: Could not duplicate write side of second pipe.\n");
 
         /* sort should not read from second pipe, but stdin -- close the read side. */
-        return_value = close(pipe_fds[1][PIPE_READ_SIDE]);
+        return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
         check_error(return_value, "Could not close read side of second pipe.");
 
         /* Execute sort and give it "sort" as first parameter. */
@@ -93,25 +107,28 @@ int main(int argc, char** argv) {
 
     /* Forking `sort` went fine. */
     /* Parent should use none of the first pipe ends -- close them. */
-    return_value = close(pipe_fds[0][PIPE_WRITE_SIDE]);
+    return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
     check_error(return_value, "Could not close write side of first pipe.\n");
-    return_value = close(pipe_fds[0][PIPE_READ_SIDE]);
+    return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
     check_error(return_value, "Could not close read side of first pipe.\n");
+
+    /* Another filter done and a pipe closed -- move cur_pipe forward. */
+    ++cur_pipe;
     
     /* Create child process that will eventually execute `less`. */
     childpid = fork();
 
     if (0 == childpid) {
         /* Replace stdin with duplicated read side of second pipe. */
-        return_value = dup2(pipe_fds[1][PIPE_READ_SIDE], STDIN_FILENO);
+        return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
         check_error(return_value, "less&: Could not duplicate read side of second pipe.\n");
 
         /* less should not write to write side of second pipe -- close it. */
-        return_value = close(pipe_fds[1][PIPE_WRITE_SIDE]);
+        return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
         check_error(return_value, "Could not close write side of second pipe.\n");
 
         /* less uses STDIN_FILENO to read from pipe, so we can close this. */
-        return_value = close(pipe_fds[1][PIPE_READ_SIDE]);
+        return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
         check_error(return_value, "Could not close write side of second pipe.\n");
 
         /* Execute less and give it "less" as first parameter. */
@@ -125,9 +142,9 @@ int main(int argc, char** argv) {
 
     /* Forking `less` went fine. */
     /* Parent should use none of the second pipe ends either -- close them. */
-    return_value = close(pipe_fds[1][PIPE_WRITE_SIDE]);
+    return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
     check_error(return_value, "Could not close write side of second pipe.\n");
-    return_value = close(pipe_fds[1][PIPE_READ_SIDE]);
+    return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
     check_error(return_value, "Could not close read side of second pipe.\n");
 
     /* Wait for children to exit. */
