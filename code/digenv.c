@@ -28,6 +28,7 @@ int main(int argc, char** argv) {
     int i;
     /* The index of the pipe_fd that follows the current filter. */
     int cur_pipe = 0;
+    char* pager;
 
     if (argc > 1) {
         num_pipes = 3;
@@ -88,6 +89,7 @@ int main(int argc, char** argv) {
             return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
             check_error(return_value, "grep&: Could not close read side of second pipe.");
             
+            /* digenv is longer than "grep", so no buffer overflow */
             argv[0] = "grep";
             (void) execvp("grep", argv);
 
@@ -142,7 +144,6 @@ int main(int argc, char** argv) {
     if (0 == childpid) {
         /* Replace stdin with duplicated read side of second pipe. */
         return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
-        fprintf(stderr, "cur_pipe = %d\n", cur_pipe);
         check_error(return_value, "less&: Could not duplicate read side of pipe.\n");
 
         /* less should not write to write side of second pipe -- close it. */
@@ -153,10 +154,13 @@ int main(int argc, char** argv) {
         return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
         check_error(return_value, "less&: Could not close write side of pipe.\n");
 
-        /* Execute less and give it "less" as first parameter. */
+        pager = getenv("PAGER");
+        /* Try first with $PAGER, then "less" and then with "more". */
+        (void) execlp(pager, pager, (char *) 0);
         (void) execlp("less", "less", (char *) 0);
+        (void) execlp("more", "more", (char *) 0);
 
-        fprintf(stderr, "Could not execute less.\n");
+        fprintf(stderr, "Could not execute pager.\n");
         exit(1);
     }
 
