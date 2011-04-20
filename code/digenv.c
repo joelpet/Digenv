@@ -15,6 +15,7 @@
 typedef int pipe_fd_t[2];
 
 void check_error(int, char*);
+void close_pipes(int, pipe_fd_t*);
 
 int main(int argc, char** argv) {
 
@@ -28,10 +29,10 @@ int main(int argc, char** argv) {
     /* The index of the pipe_fd that follows the current filter. */
     int cur_pipe = 0;
 
-    if (argc == 0) {
-        num_pipes = 2;
-    } else {
+    if (argc > 1) {
         num_pipes = 3;
+    } else {
+        num_pipes = 2;
     }
 
     /* Create pipes. */
@@ -66,15 +67,40 @@ int main(int argc, char** argv) {
     check_error(childpid,  "Could not fork printenv.\n");
 
     /* Forking `printenv` went fine. */
-
     /* Done with one filter, move cur_pipe one step ahead. */
-    ++cur_pipe;
+    ++cur_pipe; /* == 1 */
 
     /* If arguments where given, use grep with those. */
     if (argc > 1) {
+        /* Create child process that will eventually execute `grep`. */
+        childpid = fork();
 
+        if (0 == childpid) {
+            return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
+            check_error(return_value, "grep&: Could not duplicate read side of pipe.\n");
+
+            return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
+            check_error(return_value, "grep&: Could not close write side of pipe.");
+
+            return_value = dup2(pipe_fds[cur_pipe][PIPE_WRITE_SIDE], STDOUT_FILENO);
+            check_error(return_value, "grep&: Could not duplicate write side of pipe.\n");
+
+            return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
+            check_error(return_value, "grep&: Could not close read side of second pipe.");
+            
+            argv[0] = "grep";
+            (void) execvp("grep", argv);
+
+            fprintf(stderr, "Could not execute grep.\n");
+            exit(1);
+        }
+
+        check_error(childpid,  "Could not fork grep.\n");
+ 
+        /* Another filter done -- increment cur_pipe and close pipes. */
+        ++cur_pipe;
+        close_pipes(cur_pipe, pipe_fds);
     }
-
 
     /* Create child process that will eventually execute `sort`. */
     childpid = fork();
@@ -86,7 +112,7 @@ int main(int argc, char** argv) {
 
         /* sort should not write to first pipe -- close the write side. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
-        check_error(return_value, "Could not close write side of first pipe.");
+        check_error(return_value, "sort&: Could not close write side of first pipe.");
 
         /* Replace stdout with duplicated write side of second pipe. */
         return_value = dup2(pipe_fds[cur_pipe][PIPE_WRITE_SIDE], STDOUT_FILENO);
@@ -94,7 +120,7 @@ int main(int argc, char** argv) {
 
         /* sort should not read from second pipe, but stdin -- close the read side. */
         return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
-        check_error(return_value, "Could not close read side of second pipe.");
+        check_error(return_value, "sort&: Could not close read side of second pipe.");
 
         /* Execute sort and give it "sort" as first parameter. */
         (void) execlp("sort", "sort", (char *) 0);
@@ -106,30 +132,26 @@ int main(int argc, char** argv) {
     check_error(childpid,  "Could not fork sort.\n");
 
     /* Forking `sort` went fine. */
-    /* Parent should use none of the first pipe ends -- close them. */
-    return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
-    check_error(return_value, "Could not close write side of first pipe.\n");
-    return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
-    check_error(return_value, "Could not close read side of first pipe.\n");
-
-    /* Another filter done and a pipe closed -- move cur_pipe forward. */
+    /* Another filter forked -- move cur_pipe forward and close pipes if necessary. */
     ++cur_pipe;
-    
+    close_pipes(cur_pipe, pipe_fds);
+
     /* Create child process that will eventually execute `less`. */
     childpid = fork();
 
     if (0 == childpid) {
         /* Replace stdin with duplicated read side of second pipe. */
         return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
-        check_error(return_value, "less&: Could not duplicate read side of second pipe.\n");
+        fprintf(stderr, "cur_pipe = %d\n", cur_pipe);
+        check_error(return_value, "less&: Could not duplicate read side of pipe.\n");
 
         /* less should not write to write side of second pipe -- close it. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
-        check_error(return_value, "Could not close write side of second pipe.\n");
+        check_error(return_value, "less&: Could not close write side of pipe.\n");
 
         /* less uses STDIN_FILENO to read from pipe, so we can close this. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
-        check_error(return_value, "Could not close write side of second pipe.\n");
+        check_error(return_value, "less&: Could not close write side of pipe.\n");
 
         /* Execute less and give it "less" as first parameter. */
         (void) execlp("less", "less", (char *) 0);
@@ -141,19 +163,15 @@ int main(int argc, char** argv) {
     check_error(childpid, "Could not fork.\n");
 
     /* Forking `less` went fine. */
-    /* Parent should use none of the second pipe ends either -- close them. */
-    return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
-    check_error(return_value, "Could not close write side of second pipe.\n");
-    return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
-    check_error(return_value, "Could not close read side of second pipe.\n");
+    /* Another filter forked -- increment cur_pipe and close pipes if necessary. */
+    ++cur_pipe;
+    close_pipes(cur_pipe, pipe_fds);
 
     /* Wait for children to exit. */
-    childpid = wait(&status);
-    check_error(childpid, "wait() failed unexpectedly.\n");
-    childpid = wait(&status);
-    check_error(childpid, "wait() failed unexpectedly.\n");
-    childpid = wait(&status);
-    check_error(childpid, "wait() failed unexpectedly.\n");
+    for (i = 0; i < num_pipes + 1; ++i) {
+        childpid = wait(&status);
+        check_error(childpid, "wait() failed unexpectedly.\n");
+    }
 
     exit(0);
 }
@@ -166,3 +184,12 @@ void check_error(int return_value, char* error_message) {
     }
 }
 
+void close_pipes(int cur_pipe, pipe_fd_t* pipe_fds) {
+    int return_value;
+    if (cur_pipe >= 2) {
+        return_value = close(pipe_fds[cur_pipe-2][PIPE_WRITE_SIDE]);
+        check_error(return_value, "Could not close write side of pipe.\n");
+        return_value = close(pipe_fds[cur_pipe-2][PIPE_READ_SIDE]);
+        check_error(return_value, "Could not close read side of pipe.\n");
+    }
+}
