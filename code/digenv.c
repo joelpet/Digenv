@@ -1,7 +1,9 @@
-#include <sys/types.h>
-#include <sys/wait.h>
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define PIPE_READ_SIDE 0
@@ -16,6 +18,7 @@
 typedef int pipe_fd_t[2];
 
 void check_error(int, char*);
+void _check_error(int, char*, int);
 void close_pipes(int, pipe_fd_t*);
 
 int main(int argc, char** argv) {
@@ -23,9 +26,11 @@ int main(int argc, char** argv) {
     pid_t childpid;
     /* Array of three pipe file descriptors. */
     pipe_fd_t pipe_fds[3];
-    int num_pipes;
+    int num_filters = argc > 1 ? 4 : 3;
+    int num_pipes = num_filters - 1;
     int return_value;
     int status;
+    int exit_code = 0;
     int i;
     /* The index of the pipe_fd that follows the current filter. */
     int cur_pipe = 0;
@@ -33,8 +38,10 @@ int main(int argc, char** argv) {
 
     if (argc > 1) {
         num_pipes = 3;
+        num_filters = 4;
     } else {
         num_pipes = 2;
+        num_filters = 3;
     }
 
     /* Create pipes. */
@@ -143,11 +150,11 @@ int main(int argc, char** argv) {
     childpid = fork();
 
     if (0 == childpid) {
-        /* Replace stdin with duplicated read side of second pipe. */
+        /* Replace stdin with duplicated read side of previous pipe. */
         return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
         check_error(return_value, "less&: Could not duplicate read side of pipe.\n");
 
-        /* less should not write to write side of second pipe -- close it. */
+        /* less should not write to write side of previous pipe -- close it. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
         check_error(return_value, "less&: Could not close write side of pipe.\n");
 
@@ -156,7 +163,7 @@ int main(int argc, char** argv) {
         check_error(return_value, "less&: Could not close write side of pipe.\n");
 
         pager = getenv("PAGER");
-        /* Try first with $PAGER, then "less" and then with "more". */
+        /* Try first with $PAGER (if set), then "less" and then with "more". */
         if (NULL != pager) {
             (void) execlp(pager, pager, (char *) 0);
         }
@@ -174,20 +181,44 @@ int main(int argc, char** argv) {
     ++cur_pipe;
     close_pipes(cur_pipe, pipe_fds);
 
-    /* Wait for children to exit. */
-    for (i = 0; i < num_pipes + 1; ++i) {
+    /* Wait for filter children to exit and check their exit statuses. */
+    for (i = 0; i < num_filters; ++i) {
         childpid = wait(&status);
         check_error(childpid, "wait() failed unexpectedly.\n");
+
+        if (WIFEXITED(status)) {
+            /* Child terminated normally, by calling exit(), _exit() or by return from main(). */
+            int child_status = WEXITSTATUS(status);
+            if (0 != child_status && 0 == exit_code) {
+                /* 
+                 * Child terminated with non-zero status, indicating some
+                 * problem. However, it does not have to be fatal; grep exits
+                 * with status 1 if no matches were found. Save exit status.
+                 */
+                exit_code = child_status;
+            }
+        } else {
+            if (WIFSIGNALED(status) && 0 == exit_code) {
+                /* Child was terminated by a signal (WTERMSIG(status)). */
+                /* Exit with non-zero status to indicate this. */
+                exit_code = 2;
+            }
+        }
     }
 
-    exit(0);
+    /* Exit with first non-zero child exit status, or 0 if everything went fine. */
+    exit(exit_code);
 }
 
 
-void check_error(int return_value, char* error_message) {
+void check_error(int return_value, char* error_prefix) {
+    _check_error(return_value, error_prefix, 1);
+}
+
+void _check_error(int return_value, char* error_prefix, int exit_code) {
     if (-1 == return_value) {
-        fputs(error_message, stderr);
-        exit(1);
+        perror(error_prefix);
+        exit(exit_code);
     }
 }
 
