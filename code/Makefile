@@ -9,7 +9,7 @@ SHELL = /bin/sh
 CC = gcc
 
 # Extra flags to give to the C preprocessor and programs that use it (the C and Fortran compilers). 
-CFLAGS = -Wall -Wextra -g -ansi
+CFLAGS = -Wall -Wextra -g -ansi -D_POSIX_SOURCE
 
 ##################################################
 ## Setup files variables
