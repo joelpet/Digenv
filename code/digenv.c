@@ -157,7 +157,9 @@ int main(int argc, char** argv) {
 
         pager = getenv("PAGER");
         /* Try first with $PAGER, then "less" and then with "more". */
-        (void) execlp(pager, pager, (char *) 0);
+        if (NULL != pager) {
+            (void) execlp(pager, pager, (char *) 0);
+        }
         (void) execlp("less", "less", (char *) 0);
         (void) execlp("more", "more", (char *) 0);
 
