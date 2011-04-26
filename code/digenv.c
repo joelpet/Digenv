@@ -1,3 +1,6 @@
+/* TODO Lägg till kodstyckeskommentarer där det är nödvändigt, enligt http://www.ict.kth.se/courses/ID2206/LAB/cdok */
+/* TODO Låt eventuellt några av de nuvarande kommentarerna ersättas av sådana kodstyckeskommentarer. */
+
 /*
  * NAME:
  *  digenv  -   study your environment variables
@@ -54,9 +57,6 @@
 
 #define PIPE_READ_SIDE 0
 #define PIPE_WRITE_SIDE 1
-
-/* TODO update comments */
-/* TODO hantera fall där en fas i pipeliningen misslyckas, t.ex. fel parametrar till grep */
 
 /*
  * Define a pipe file descriptor type for neater code.
