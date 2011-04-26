@@ -1,3 +1,32 @@
+/*
+ * NAME:
+ *  digenv  -   study your environment variables
+ *
+ * SYNTAX:
+ *  digenv [parameters]
+ *
+ * DESCRIPTION:
+ *  Digenv displays your environment variables sorted in a pager, optionally
+ *  filtered through `grep` with the given input parameters, if any present. If
+ *  $PAGER is present, digenv will try to use that command as pager, otherwise
+ *  it tries `less` and thereafter falls back to `more`
+ *
+ * OPTIONS:
+ *  See grep(1). All parameters will be passed directly to `grep`.
+ *
+ * EXAMPLES:
+ *  Simply display all environment variables sorted in a pager:
+ *  $ digenv
+ *
+ *  Display all environment variables with a name containing "user" (-i means
+ *  ignore case):
+ *  $ digenv -i user
+ *
+ * SEE ALSO:
+ *   printenv(1), grep(1), sort(1), less(1), more(1)
+ *
+ */
+
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
