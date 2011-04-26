@@ -38,6 +38,12 @@
  *  went wrong.
  */
 
+/* digenv
+ *
+ * This module contains the whole digenv program, including main() and
+ * functions for error checking and closing pipes.
+ */
+
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -52,7 +58,7 @@
 /* TODO update comments */
 /* TODO hantera fall där en fas i pipeliningen misslyckas, t.ex. fel parametrar till grep */
 
-/**
+/*
  * Define a pipe file descriptor type for neater code.
  */
 typedef int pipe_fd_t[2];
@@ -61,7 +67,15 @@ void check_error(int, char*);
 void _check_error(int, char*, int);
 void close_pipes(int, pipe_fd_t*);
 
-int main(int argc, char** argv) {
+
+/* main
+ *
+ * main creates the necessary pipes and invokes the filters.
+ */
+int main(
+        int argc,       /* number of given arguments */
+        char** argv)    /* array of argument char arrays */
+{
 
     pid_t childpid;
     /* Array of three pipe file descriptors. */
@@ -251,18 +265,42 @@ int main(int argc, char** argv) {
 }
 
 
-void check_error(int return_value, char* error_prefix) {
+/* check_error
+ *
+ * check_error calls _check_error() with a predefined exit code.
+ */
+void check_error(
+        int return_value,   /* return value to check for -1 value */
+        char* error_prefix) /* short string to prefix the error message with */
+{
     _check_error(return_value, error_prefix, 1);
 }
 
-void _check_error(int return_value, char* error_prefix, int exit_code) {
+/* _check_error
+ *
+ * _check_error checks if return_value is -1 and takes appropriate actions,
+ * such as printing an error message and exiting with the given exit_code.
+ */
+void _check_error(
+        int return_value,   /* return value to check for -1 value */
+        char* error_prefix, /* short string to prefix the error message with */
+        int exit_code)      /* the code to exit the program with */
+{
     if (-1 == return_value) {
         perror(error_prefix);
         exit(exit_code);
     }
 }
 
-void close_pipes(int cur_pipe, pipe_fd_t* pipe_fds) {
+/* close_pipes
+ *
+ * close_pipes closes pipes that pressumably are not going to be used.
+ */
+void close_pipes(
+        int cur_pipe,           /* index of the pipe in pipe_fds that is going
+                                   to be initiated next */
+        pipe_fd_t* pipe_fds)    /* array of pipe file descriptors */
+{
     int return_value;
     if (cur_pipe >= 2) {
         return_value = close(pipe_fds[cur_pipe-2][PIPE_WRITE_SIDE]);
