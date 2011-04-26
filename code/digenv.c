@@ -1,6 +1,3 @@
-/* TODO Lägg till kodstyckeskommentarer där det är nödvändigt, enligt http://www.ict.kth.se/courses/ID2206/LAB/cdok */
-/* TODO Låt eventuellt några av de nuvarande kommentarerna ersättas av sådana kodstyckeskommentarer. */
-
 /*
  * NAME:
  *  digenv  -   study your environment variables
@@ -76,51 +73,52 @@ int main(
         int argc,       /* number of given arguments */
         char** argv)    /* array of argument char arrays */
 {
+    pid_t childpid; /* placeholder for child process IDs */
+    pipe_fd_t pipe_fds[3]; /* array of three pipe file descriptors */
+    int num_filters = argc > 1 ? 4 : 3; /* number of filters to use */
+    int num_pipes = num_filters - 1; /* number of pipes to use */
+    int return_value; /* used for storing return values from syscalls */
+    int status; /* used for getting status of exited child processes */
+    int exit_code = 0; /* stores the code to exit with */
+    int i; /* loop variable */
+    int cur_pipe = 0; /* index of the pipe_fd that follows the current filter */
+    char* pager; /* used to get the pager command name */
 
-    pid_t childpid;
-    /* Array of three pipe file descriptors. */
-    pipe_fd_t pipe_fds[3];
-    int num_filters = argc > 1 ? 4 : 3;
-    int num_pipes = num_filters - 1;
-    int return_value;
-    int status;
-    int exit_code = 0;
-    int i;
-    /* The index of the pipe_fd that follows the current filter. */
-    int cur_pipe = 0;
-    char* pager;
-
-    if (argc > 1) {
-        num_pipes = 3;
-        num_filters = 4;
-    } else {
-        num_pipes = 2;
-        num_filters = 3;
-    }
-
-    /* Create pipes. */
+    /* 
+     * Create pipes. 
+     */
     for (i = 0; i < num_pipes; ++i) {
         return_value = pipe(pipe_fds[i]);
         check_error(return_value, "Could not initialize pipe.\n");
     }
 
-    /* Create child process that will eventually execute `printenv`. */
+    /*
+     * Fork a child process and update its file descriptors to use a pipe for
+     * its output. Then execute the `printenv` command, which will inherit the
+     * File Descriptor Table.
+     */
     childpid = fork();
 
     if (0 == childpid) {
-        /* Replace stdout med duplicated write side of the pipe. */
+        /*
+         * This code is executed only in the child process.
+         *
+         * Overwrite stdout file descriptor with the one that points to the
+         * write side of the current pipe, and close file descriptors to both
+         * sides of the pipe, since we now have a file descriptor (stdout) that
+         * points to the write side of the pipe. Then try to execute `printenv`
+         * with "printenv" as the first argument, by convention.
+         */
+
         return_value = dup2(pipe_fds[cur_pipe][PIPE_WRITE_SIDE], STDOUT_FILENO);
         check_error(return_value,  "printenv&: Could not duplicate write side of first pipe.\n");
-    
-        /* printenv should not read from pipe -- close the read side. */
+
         return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
         check_error(return_value,  "Could not close read side of pipe.\n");
 
-        /* stdout now points to write side of pipe -- close duplicated file desc. */
         return_value = close(pipe_fds[cur_pipe][PIPE_WRITE_SIDE]);
         check_error(return_value,  "Could not close write side of pipe.\n");
 
-        /* Execute printenv and give it "printenv" as first parameter. */
         (void) execlp("printenv", "printenv", (char *) 0);
 
         fprintf(stderr, "Could not execute printenv.\n");
@@ -129,16 +127,32 @@ int main(
 
     check_error(childpid,  "Could not fork printenv.\n");
 
-    /* Forking `printenv` went fine. */
-    /* Done with one filter, move cur_pipe one step ahead. */
-    ++cur_pipe; /* == 1 */
+    /*
+     * If we get here, forking `printenv` went just fine, so increment cur_pipe
+     * counter.
+     */
 
-    /* If arguments where given, use grep with those. */
+    ++cur_pipe;     /* is now unconditionally 1 */
+
+    /* 
+     * If arguments where given, call `grep` with those. 
+     */
     if (argc > 1) {
-        /* Create child process that will eventually execute `grep`. */
+        /*
+         * Fork a child process and update its file descriptors to use a pipe for
+         * input and output. Then execute the `grep` command, which will
+         * inherit the File Descriptor Table.
+         */
         childpid = fork();
 
         if (0 == childpid) {
+            /*
+             * This code is executed only in the child process.
+             *
+             * Same thing here as previously; replace (stdin and) stdout file
+             * descriptors with those from the current pipes. Then close unused
+             * sides of the pipes.
+             */
             return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
             check_error(return_value, "grep&: Could not duplicate read side of pipe.\n");
 
@@ -151,8 +165,8 @@ int main(
             return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
             check_error(return_value, "grep&: Could not close read side of second pipe.");
             
-            /* digenv is longer than "grep", so no buffer overflow */
-            argv[0] = "grep";
+            
+            argv[0] = "grep";   /* digenv is longer than "grep", so no buffer overflow */
             (void) execvp("grep", argv);
 
             fprintf(stderr, "Could not execute grep.\n");
@@ -161,32 +175,38 @@ int main(
 
         check_error(childpid,  "Could not fork grep.\n");
  
-        /* Another filter done -- increment cur_pipe and close pipes. */
+        /*
+         * Another filter done, and everything went fine this far; increment
+         * cur_pipe counter and also close the pipes in parent process, since
+         * it's not going to use them.
+         */
         ++cur_pipe;
         close_pipes(cur_pipe, pipe_fds);
     }
 
-    /* Create child process that will eventually execute `sort`. */
+    /*
+     * Same forking procedure as earlier, but this time executing `sort`.
+     */
     childpid = fork();
 
     if (0 == childpid) {
-        /* Replace stdin with duplicated read side of first pipe. */
+        /*
+         * Same as before; duplicate file descriptors and close unused pipe
+         * ends. Then execute `sort`.
+         */
+
         return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
         check_error(return_value, "sort&: Could not duplicate read side of first pipe.\n");
 
-        /* sort should not write to first pipe -- close the write side. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
         check_error(return_value, "sort&: Could not close write side of first pipe.");
 
-        /* Replace stdout with duplicated write side of second pipe. */
         return_value = dup2(pipe_fds[cur_pipe][PIPE_WRITE_SIDE], STDOUT_FILENO);
         check_error(return_value, "sort&: Could not duplicate write side of second pipe.\n");
 
-        /* sort should not read from second pipe, but stdin -- close the read side. */
         return_value = close(pipe_fds[cur_pipe][PIPE_READ_SIDE]);
         check_error(return_value, "sort&: Could not close read side of second pipe.");
 
-        /* Execute sort and give it "sort" as first parameter. */
         (void) execlp("sort", "sort", (char *) 0);
 
         fprintf(stderr, "Could not execute sort.\n");
@@ -195,29 +215,40 @@ int main(
 
     check_error(childpid,  "Could not fork sort.\n");
 
-    /* Forking `sort` went fine. */
-    /* Another filter forked -- move cur_pipe forward and close pipes if necessary. */
+    /*
+     * Again, everything went fine, so increment cur_pipe counter and close pipes.
+     */
     ++cur_pipe;
     close_pipes(cur_pipe, pipe_fds);
 
-    /* Create child process that will eventually execute `less`. */
+    /*
+     * This is the last filter, but forking procedure is almost the same; first
+     * take care of pipes, but instead of simply executing a file, we first
+     * need to determine what file (pager) to execute.
+     */
     childpid = fork();
 
     if (0 == childpid) {
-        /* Replace stdin with duplicated read side of previous pipe. */
+        /*
+         * Replace stdin with read side of previous pipe and close unused sides
+         * of the current pipe.          
+         */
         return_value = dup2(pipe_fds[cur_pipe-1][PIPE_READ_SIDE], STDIN_FILENO);
         check_error(return_value, "less&: Could not duplicate read side of pipe.\n");
 
-        /* less should not write to write side of previous pipe -- close it. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_WRITE_SIDE]);
         check_error(return_value, "less&: Could not close write side of pipe.\n");
 
-        /* less uses STDIN_FILENO to read from pipe, so we can close this. */
         return_value = close(pipe_fds[cur_pipe-1][PIPE_READ_SIDE]);
         check_error(return_value, "less&: Could not close write side of pipe.\n");
 
+        /*
+         * Lookup environment variable PAGER, to see if such exists and, if so,
+         * execute it. The commands `less` and `more` are provided as fallback
+         * pagers, in that order. Exit with status 1 if no pager could be
+         * executed.
+         */
         pager = getenv("PAGER");
-        /* Try first with $PAGER (if set), then "less" and then with "more". */
         if (NULL != pager) {
             (void) execlp(pager, pager, (char *) 0);
         }
@@ -230,18 +261,25 @@ int main(
 
     check_error(childpid, "Could not fork.\n");
 
-    /* Forking `less` went fine. */
-    /* Another filter forked -- increment cur_pipe and close pipes if necessary. */
+    /*
+     * Once again, everything went fine, so increment cur_pipe counter and
+     * close previous pipe in parent process.
+     */
     ++cur_pipe;
     close_pipes(cur_pipe, pipe_fds);
 
-    /* Wait for filter children to exit and check their exit statuses. */
+    /* 
+     * Wait for filter children to exit and check their exit statuses. 
+     */
     for (i = 0; i < num_filters; ++i) {
         childpid = wait(&status);
         check_error(childpid, "wait() failed unexpectedly.\n");
 
         if (WIFEXITED(status)) {
-            /* Child terminated normally, by calling exit(), _exit() or by return from main(). */
+            /* 
+             * Child terminated normally, by calling exit(), _exit() or by
+             * return from main(). 
+             */
             int child_status = WEXITSTATUS(status);
             if (0 != child_status && 0 == exit_code) {
                 /* 
@@ -253,14 +291,18 @@ int main(
             }
         } else {
             if (WIFSIGNALED(status) && 0 == exit_code) {
-                /* Child was terminated by a signal (WTERMSIG(status)). */
-                /* Exit with non-zero status to indicate this. */
+                /* 
+                 * Child was terminated by a signal (WTERMSIG(status)). Set
+                 * exit status to non-zero to indicate this. 
+                 */
                 exit_code = 2;
             }
         }
     }
 
-    /* Exit with first non-zero child exit status, or 0 if everything went fine. */
+    /* 
+     * Exit with first non-zero child exit status, or 0 if everything went fine. 
+     */
     exit(exit_code);
 }
 
