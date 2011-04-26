@@ -22,9 +22,20 @@
  *  ignore case):
  *  $ digenv -i user
  *
+ * ENVIRONMENT:
+ *  PAGER       The command to execute for launching a pager.
+ *
  * SEE ALSO:
  *   printenv(1), grep(1), sort(1), less(1), more(1)
  *
+ * DIAGNOSTICS:
+ *  The exit status is 0 if everything went fine, 1 if any system call
+ *  failed, e.g. creating a pipe or executing a file, or if `grep` did not find
+ *  anything, and 2 if `grep` failed or a child was terminated by a signal.
+ *
+ * NOTES:
+ *  The exit statuses could be refined in order to better indicate exactly what
+ *  went wrong.
  */
 
 #include <errno.h>
